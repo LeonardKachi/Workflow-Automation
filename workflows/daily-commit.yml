@@ -3,26 +3,25 @@ name: Daily Commit
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # Runs at 00:00 UTC every day
+    - cron: '0 8 * * *'  # Runs at 8 AM UTC daily
   workflow_dispatch:      # Allows manual trigger
 
 jobs:
-  commit:
+  daily-commit:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Update timestamp file
-        run: |
-          echo "Daily update: $(date)" >> daily_log.txt
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-
-      - name: Commit and push
-        run: |
-          git add daily_log.txt
-          git commit -m "Daily commit: $(date)"
-          git push
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+          
+      - name: Run daily commit script
+        run: python daily_commit.py
