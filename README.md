@@ -5,6 +5,13 @@ Heat Map Loader
 
 
 ### 2026-01-27
+- **Activity**: Improved installation guide
+- **Type**: Docs
+- **Time**: 12:16:21
+
+---
+
+### 2026-01-27
 - **Activity**: Improved backup procedures
 - **Type**: Infra
 - **Time**: 12:13:30
