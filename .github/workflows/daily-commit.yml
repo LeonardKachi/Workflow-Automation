@@ -82,6 +82,10 @@ jobs:
         if: always()
         run: |
           rm -f placeholder.md 2>/dev/null || true
+      
+      - name: Push changes
+        run: |
+          git push origin HEAD
 
   # Additional job for analytics (optional)
   analytics:
