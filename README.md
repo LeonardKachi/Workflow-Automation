@@ -5,6 +5,13 @@ Heat Map Loader
 
 
 ### 2026-01-28
+- **Activity**: Created troubleshooting section
+- **Type**: Docs
+- **Time**: 21:49:52
+
+---
+
+### 2026-01-28
 - **Activity**: Updated changelog
 - **Type**: Docs
 - **Time**: 18:20:03
