@@ -66,3 +66,20 @@ database:
 logging:
   level: "INFO"
   file: "app.log"
+
+# Settings file
+# Updated: 2026-01-29 04:12:16
+
+app:
+  name: "Automation Project"
+  version: "1.0.41"
+  environment: "development"
+
+database:
+  host: "localhost"
+  port: 5432
+  name: "automation_db"
+
+logging:
+  level: "INFO"
+  file: "app.log"
