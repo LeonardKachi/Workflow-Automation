@@ -5,6 +5,13 @@ Heat Map Loader
 
 
 ### 2026-01-29
+- **Activity**: Added project roadmap
+- **Type**: Docs
+- **Time**: 09:09:02
+
+---
+
+### 2026-01-29
 - **Activity**: Enhanced deployment scripts
 - **Type**: Infra
 - **Time**: 04:12:16
