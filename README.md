@@ -5,6 +5,13 @@ Heat Map Loader
 
 
 ### 2026-01-29
+- **Activity**: Created troubleshooting section
+- **Type**: Docs
+- **Time**: 23:58:16
+
+---
+
+### 2026-01-29
 - **Activity**: Updated dependency versions
 - **Type**: Infra
 - **Time**: 21:47:21
