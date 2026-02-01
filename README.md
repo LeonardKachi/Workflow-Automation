@@ -5,6 +5,13 @@ Heat Map Loader
 
 
 ### 2026-02-01
+- **Activity**: Added code examples to README
+- **Type**: Docs
+- **Time**: 23:57:49
+
+---
+
+### 2026-02-01
 - **Activity**: Optimized server configuration
 - **Type**: Infra
 - **Time**: 21:42:24
