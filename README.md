@@ -5,6 +5,13 @@ Heat Map Loader
 
 
 ### 2026-02-03
+- **Activity**: Documented configuration options
+- **Type**: Docs
+- **Time**: 21:53:52
+
+---
+
+### 2026-02-03
 - **Activity**: Enhanced deployment scripts
 - **Type**: Infra
 - **Time**: 18:37:40
