@@ -1,0 +1,15 @@
+============================= test session starts ==============================
+platform linux -- Python 3.10.19, pytest-9.0.2, pluggy-1.6.0 -- /opt/hostedtoolcache/Python/3.10.19/x64/bin/python
+cachedir: .pytest_cache
+rootdir: /home/runner/work/Heat/Heat
+collecting ... collected 7 items
+
+tests/test_sample.py::test_addition PASSED                               [ 14%]
+tests/test_sample.py::test_list_operations PASSED                        [ 28%]
+tests/test_sample.py::test_random_generation PASSED                      [ 42%]
+tests/test_sample.py::test_string_operations PASSED                      [ 57%]
+tests/test_sample.py::TestMathOperations::test_multiplication PASSED     [ 71%]
+tests/test_sample.py::TestMathOperations::test_division PASSED           [ 85%]
+tests/test_sample.py::TestMathOperations::test_power PASSED              [100%]
+
+============================== 7 passed in 0.03s ===============================
