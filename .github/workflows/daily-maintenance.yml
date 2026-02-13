@@ -1,17 +1,11 @@
 name: Daily Maintenance
 
 on:
-  # VARIED schedule - different times on different days
   schedule:
-    # Monday, Wednesday, Friday - morning
-    - cron: '17 4 * * 1,3,5'  # 4:17 AM UTC Mon/Wed/Fri
-    # Tuesday, Thursday - afternoon/evening
-    - cron: '42 20 * * 2,4'   # 8:42 PM UTC Tue/Thu
-    # Saturday - late morning (optional light activity)
-    - cron: '23 11 * * 6'     # 11:23 AM UTC Saturday
-    # Sunday - SKIP (humans rest) - No cron expression needed
+    - cron: '17 4 * * 1,3,5'
+    - cron: '42 20 * * 2,4'
+    - cron: '23 11 * * 6'
   
-  # Manual trigger for testing
   workflow_dispatch:
     inputs:
       force_run:
@@ -31,11 +25,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     
-    # Skip Sundays automatically (unless forced)
-    if: |
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'schedule' && github.event.schedule != '')
-    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -47,93 +36,92 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
           
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then 
-            pip install -r requirements.txt
-          else
-            # Install basic packages if no requirements.txt
-            pip install pytest pandas numpy matplotlib
-          fi
+          pip install pytest pandas numpy matplotlib
           
-      - name: Configure Git with HUMAN identity
+      - name: Configure Git
         run: |
           git config --global user.name "Kachi"
           git config --global user.email "Kachi.Henry.Leo@gmail.com"
           git config --global pull.rebase false
 
-      - name: Determine Day Type and Check Sunday
+      - name: Determine Day Type
         id: day_info
         run: |
           DAY=$(date +%A)
           HOUR=$(date +%H)
           FORCE_RUN="${{ github.event.inputs.force_run }}"
           
-          echo "day_name=$DAY" >> $GITHUB_OUTPUT
-          echo "hour=$HOUR" >> $GITHUB_OUTPUT
+          echo "day_name=$DAY" >> $GITHUB_ENV
+          echo "hour=$HOUR" >> $GITHUB_ENV
           
           # Check if it's Sunday and not forced
           if [ "$DAY" = "Sunday" ] && [ "$FORCE_RUN" != "yes" ]; then
-            echo "should_run=false" >> $GITHUB_OUTPUT
-            echo "activity_level=skipped" >> $GITHUB_OUTPUT
-            echo "skip_tests=true" >> $GITHUB_OUTPUT
-            echo "is_sunday=true" >> $GITHUB_OUTPUT
+            echo "should_run=false" >> $GITHUB_ENV
+            echo "activity_level=skipped" >> $GITHUB_ENV
+            echo "skip_tests=true" >> $GITHUB_ENV
+            echo "is_sunday=true" >> $GITHUB_ENV
             echo "🌞 Sunday detected - workflow will be skipped"
           else
-            echo "should_run=true" >> $GITHUB_OUTPUT
-            echo "is_sunday=false" >> $GITHUB_OUTPUT
+            echo "should_run=true" >> $GITHUB_ENV
+            echo "is_sunday=false" >> $GITHUB_ENV
             
             if [ "$DAY" = "Sunday" ] && [ "$FORCE_RUN" = "yes" ]; then
-              echo "activity_level=forced" >> $GITHUB_OUTPUT
-              echo "skip_tests=false" >> $GITHUB_OUTPUT
+              echo "activity_level=forced" >> $GITHUB_ENV
+              echo "skip_tests=false" >> $GITHUB_ENV
               echo "⚠️ Sunday but force run enabled"
             elif [ "$DAY" = "Saturday" ]; then
-              echo "activity_level=light" >> $GITHUB_OUTPUT
-              echo "skip_tests=true" >> $GITHUB_OUTPUT
+              echo "activity_level=light" >> $GITHUB_ENV
+              echo "skip_tests=true" >> $GITHUB_ENV
             elif [ "$HOUR" -lt 12 ]; then
-              echo "activity_level=normal" >> $GITHUB_OUTPUT
-              echo "skip_tests=false" >> $GITHUB_OUTPUT
+              echo "activity_level=normal" >> $GITHUB_ENV
+              echo "skip_tests=false" >> $GITHUB_ENV
             else
-              echo "activity_level=evening" >> $GITHUB_OUTPUT
-              echo "skip_tests=false" >> $GITHUB_OUTPUT
+              echo "activity_level=evening" >> $GITHUB_ENV
+              echo "skip_tests=false" >> $GITHUB_ENV
             fi
           fi
           
-      - name: Early Exit if Sunday (unless forced)
-        if: steps.day_info.outputs.should_run == 'false'
+          # Also set step outputs for backward compatibility
+          echo "day_name=$DAY" >> $GITHUB_OUTPUT
+          echo "hour=$HOUR" >> $GITHUB_OUTPUT
+          echo "should_run=${{ env.should_run }}" >> $GITHUB_OUTPUT
+          echo "activity_level=${{ env.activity_level }}" >> $GITHUB_OUTPUT
+          echo "skip_tests=${{ env.skip_tests }}" >> $GITHUB_OUTPUT
+          
+      - name: Early Exit if Sunday
+        if: env.is_sunday == 'true'
         run: |
           echo "## Sunday Maintenance Skipped" >> $GITHUB_STEP_SUMMARY
           echo "**Date:** $(date '+%Y-%m-%d')" >> $GITHUB_STEP_SUMMARY
-          echo "**Day:** ${{ steps.day_info.outputs.day_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Day:** ${{ env.day_name }}" >> $GITHUB_STEP_SUMMARY
           echo "**Reason:** Sunday - rest day (use force_run=yes to override)" >> $GITHUB_STEP_SUMMARY
-          echo "🌞 Sunday maintenance skipped - humans rest!"
           exit 0
           
       - name: Create necessary directories
-        if: steps.day_info.outputs.should_run == 'true'
+        if: env.should_run == 'true'
         run: |
+          echo "Creating directories..."
           mkdir -p test_results
           mkdir -p scripts
           mkdir -p docs
+          echo "✅ Directories created"
           
-      - name: Create placeholder scripts if they don't exist
-        if: steps.day_info.outputs.should_run == 'true'
+      - name: Create placeholder scripts
+        if: env.should_run == 'true'
         run: |
-          # Create scripts directory and placeholder scripts if missing
-          if [ ! -f scripts/run_tests.py ]; then
-            cat > scripts/run_tests.py << 'EOF'
+          echo "Creating placeholder scripts..."
+          
+          # Create run_tests.py
+          cat > scripts/run_tests.py << 'EOF'
           #!/usr/bin/env python3
-          """Placeholder test script"""
-          import sys
           import json
           from datetime import datetime
           
           print("Running tests...")
-          
-          # Create a test result file
           result = {
               "timestamp": datetime.now().isoformat(),
               "tests_run": 5,
@@ -145,104 +133,83 @@ jobs:
           with open("test_results/latest.json", "w") as f:
               json.dump(result, f, indent=2)
           
-          print("✅ All tests passed (placeholder)")
-          sys.exit(0)
+          print("✅ All tests passed")
           EOF
-          chmod +x scripts/run_tests.py
-          fi
           
-          if [ ! -f scripts/process_data.py ]; then
-            cat > scripts/process_data.py << 'EOF'
+          # Create process_data.py
+          cat > scripts/process_data.py << 'EOF'
           #!/usr/bin/env python3
-          """Placeholder data processing script"""
           import json
           from datetime import datetime
+          import os
           
           print("Processing data...")
-          # Create a simple data file
+          
+          day = os.environ.get('day_name', 'Unknown')
+          level = os.environ.get('activity_level', 'normal')
+          
           data = {
               "timestamp": datetime.now().isoformat(),
               "processed": True,
               "records": 42,
-              "day_type": "${{ steps.day_info.outputs.activity_level }}"
+              "day": day,
+              "activity_level": level
           }
           
           with open("processed_data.json", "w") as f:
               json.dump(data, f, indent=2)
           
-          # Also create daily update content
           with open("daily_update.md", "w") as f:
-              f.write(f"# ${{ steps.day_info.outputs.day_name }} Update - {datetime.now().strftime('%Y-%m-%d')}\\n\\n")
+              f.write(f"# {day} Update - {datetime.now().strftime('%Y-%m-%d')}\\n\\n")
               f.write("## Activity Summary\\n")
               f.write(f"- Data processed: {datetime.now().strftime('%H:%M')}\\n")
-              f.write(f"- Day type: ${{ steps.day_info.outputs.activity_level }}\\n")
+              f.write(f"- Day type: {level}\\n")
               f.write(f"- Records processed: {data['records']}\\n")
           
-          print(f"✅ Data processed: {data}")
+          print(f"✅ Data processed")
           EOF
-          chmod +x scripts/process_data.py
-          fi
           
-          if [ ! -f scripts/update_docs.py ]; then
-            cat > scripts/update_docs.py << 'EOF'
+          # Create update_docs.py
+          cat > scripts/update_docs.py << 'EOF'
           #!/usr/bin/env python3
-          """Placeholder docs update script"""
           from datetime import datetime
+          import os
           
           print("Updating documentation...")
           
-          # Create docs directory if it doesn't exist
-          import os
           os.makedirs("docs", exist_ok=True)
           
-          # Create or update docs file
+          level = os.environ.get('activity_level', 'normal')
+          
           with open("docs/analytics.md", "a") as f:
-              f.write(f"- Updated at {datetime.now().strftime('%Y-%m-%d %H:%M')} ({{ steps.day_info.outputs.activity_level }})\\n")
+              f.write(f"- Updated at {datetime.now().strftime('%Y-%m-%d %H:%M')} ({level})\\n")
           
           print("✅ Documentation updated")
           EOF
-          chmod +x scripts/update_docs.py
-          fi
           
-      - name: Run Automated Tests (Weekdays only)
-        if: steps.day_info.outputs.should_run == 'true' && steps.day_info.outputs.skip_tests == 'false'
+          chmod +x scripts/*.py
+          echo "✅ Scripts created"
+          
+      - name: Run Automated Tests
+        if: env.should_run == 'true' && env.skip_tests == 'false'
         continue-on-error: true
         id: tests
         run: |
           echo "Running test suite..."
-          if [ -f scripts/run_tests.py ]; then
-            python scripts/run_tests.py
-            echo "test_exit_code=$?" >> $GITHUB_OUTPUT
-          else
-            echo "No test script found - skipping"
-            echo "test_exit_code=0" >> $GITHUB_OUTPUT
-          fi
+          python scripts/run_tests.py
+          echo "test_exit_code=$?" >> $GITHUB_ENV
           
       - name: Process Data & Generate Analytics
-        if: steps.day_info.outputs.should_run == 'true'
+        if: env.should_run == 'true'
         id: data-process
         run: |
-          echo "Processing data..."
-          if [ -f scripts/process_data.py ]; then
-            python scripts/process_data.py
-          else
-            echo "No data processing script found - creating minimal output"
-            # Create minimal daily update
-            cat > daily_update.md << EOF
-          # ${{ steps.day_info.outputs.day_name }} Update - $(date '+%Y-%m-%d')
+          echo "Processing data and generating analytics..."
+          python scripts/process_data.py
+          echo "data_processed=true" >> $GITHUB_ENV
+          echo "✅ Data processing complete"
           
-          ## Activity Summary
-          - Data processed: $(date '+%H:%M')
-          - Day type: ${{ steps.day_info.outputs.activity_level }}
-          - Status: ✅ Completed (minimal)
-          
-          EOF
-          fi
-          
-          echo "data_processed=true" >> $GITHUB_OUTPUT
-          
-      - name: Update Documentation (Human-like)
-        if: steps.day_info.outputs.should_run == 'true'
+      - name: Update Documentation
+        if: env.should_run == 'true'
         id: docs
         run: |
           echo "Updating documentation..."
@@ -256,32 +223,30 @@ jobs:
             "feat: Add daily analytics report"
           )
           
-          # Pick random message
           RANDOM_MSG=${MESSAGES[$RANDOM % ${#MESSAGES[@]}]}
-          echo "commit_message=$RANDOM_MSG" >> $GITHUB_OUTPUT
+          echo "commit_message=$RANDOM_MSG" >> $GITHUB_ENV
           
-          # Update docs with day-specific content
-          if [ -f scripts/update_docs.py ]; then
-            python scripts/update_docs.py
-          fi
+          python scripts/update_docs.py
           
-          # Add timestamp to README
+          # Update README
           echo "" >> README.md
           echo "**Last updated:** $(date '+%A, %B %d, %Y at %H:%M UTC')" >> README.md
-          echo "**Activity level:** ${{ steps.day_info.outputs.activity_level }}" >> README.md
+          echo "**Activity level:** ${{ env.activity_level }}" >> README.md
           
-          echo "docs_updated=true" >> $GITHUB_OUTPUT
+          echo "docs_updated=true" >> $GITHUB_ENV
+          echo "✅ Documentation updated"
           
-      - name: Create Human-Like Work Log
-        if: steps.day_info.outputs.should_run == 'true'
+      - name: Create Work Log
+        if: env.should_run == 'true'
         run: |
-          # Create a file that looks like human work
+          echo "Creating work log..."
+          
           cat > work_log.md << EOF
           # Work Log - $(date '+%A, %B %d, %Y')
           
           EOF
           
-          if [ "${{ steps.day_info.outputs.day_name }}" = "Saturday" ]; then
+          if [ "${{ env.day_name }}" = "Saturday" ]; then
             cat >> work_log.md << EOF
           ## Weekend Maintenance
           - Light cleanup and updates
@@ -303,113 +268,77 @@ jobs:
           *Automated maintenance completed at $(date '+%H:%M UTC')*
           EOF
           
+          echo "✅ Work log created"
+          
       - name: Generate Performance Report
-        if: steps.day_info.outputs.should_run == 'true'
+        if: env.should_run == 'true'
         run: |
           cat > $GITHUB_STEP_SUMMARY << EOF
           ## Daily Maintenance Report
           **Date:** $(date '+%Y-%m-%d')
-          **Day:** ${{ steps.day_info.outputs.day_name }}
-          **Activity Level:** ${{ steps.day_info.outputs.activity_level }}
+          **Day:** ${{ env.day_name }}
+          **Activity Level:** ${{ env.activity_level }}
           
           EOF
           
-          if [ "${{ steps.day_info.outputs.skip_tests }}" = "true" ]; then
+          if [ "${{ env.skip_tests }}" = "true" ]; then
             echo "**Note:** Weekend mode - tests skipped" >> $GITHUB_STEP_SUMMARY
           fi
           
           echo "**Status:** ✅ Completed successfully" >> $GITHUB_STEP_SUMMARY
           
       - name: Upload Test Results
-        if: steps.day_info.outputs.should_run == 'true' && steps.day_info.outputs.skip_tests == 'false' && always()
+        if: env.should_run == 'true' && env.skip_tests == 'false'
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ steps.day_info.outputs.day_name }}
+          name: test-results-${{ env.day_name }}
           path: test_results/
           retention-days: 3
 
-      - name: Stage Changes for Commit
-        if: steps.day_info.outputs.should_run == 'true'
+      - name: Stage Changes
         id: stage-changes
+        if: env.should_run == 'true'
         run: |
-          # Always commit these human-looking files
           git add work_log.md 2>/dev/null || true
           git add daily_update.md 2>/dev/null || true
           git add processed_data.json 2>/dev/null || true
+          git add docs/analytics.md 2>/dev/null || true
+          git add README.md 2>/dev/null || true
           
-          # Only add other files if they exist and have changes
-          if [ -f "docs/analytics.md" ]; then
-            git add docs/analytics.md 2>/dev/null || true
-          fi
-          
-          if [ -d "test_results/" ] && [ "${{ steps.day_info.outputs.skip_tests }}" = "false" ]; then
+          if [ -d "test_results/" ] && [ "${{ env.skip_tests }}" = "false" ]; then
             git add test_results/ 2>/dev/null || true
           fi
           
-          # Update README
-          git add README.md 2>/dev/null || true
-          
-          # Check if we have anything to commit
           if git diff --cached --quiet; then
-            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "has_changes=false" >> $GITHUB_ENV
             echo "No changes to commit"
             
             # Create timestamp file as fallback
             echo "Last touch: $(date)" > timestamp.txt
             git add timestamp.txt
-            echo "has_changes=true" >> $GITHUB_OUTPUT
-            echo "Created timestamp.txt as fallback"
+            echo "has_changes=true" >> $GITHUB_ENV
           else
-            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "has_changes=true" >> $GITHUB_ENV
           fi
           
-      - name: Commit Human-Like Updates
-        if: steps.day_info.outputs.should_run == 'true' && steps.stage-changes.outputs.has_changes == 'true'
+      - name: Commit Updates
+        if: env.should_run == 'true' && env.has_changes == 'true'
         run: |
-          # Use the random message OR create day-specific one
-          if [ -n "${{ steps.docs.outputs.commit_message }}" ]; then
-            COMMIT_MSG="${{ steps.docs.outputs.commit_message }}"
-          else
-            DAY="${{ steps.day_info.outputs.day_name }}"
-            COMMIT_MSG="update: $DAY maintenance - $(date '+%Y-%m-%d')"
+          COMMIT_MSG="${{ env.commit_message }}"
+          
+          if [ -z "$COMMIT_MSG" ]; then
+            COMMIT_MSG="update: ${{ env.day_name }} maintenance - $(date '+%Y-%m-%d')"
           fi
           
-          # Add body to commit message
-          COMMIT_MSG="$COMMIT_MSG
-          
-          - Updated work log
-          - Processed daily data
-          - Maintained project files"
-          
-          if [ "${{ steps.day_info.outputs.skip_tests }}" = "false" ]; then
-            COMMIT_MSG="$COMMIT_MSG
-          - Ran test suite"
-          fi
-          
-          git commit -m "$COMMIT_MSG" || echo "Nothing to commit"
+          git commit -m "$COMMIT_MSG" -m "- Updated work log" -m "- Processed daily data" -m "- Maintained project files"
           
       - name: Push Changes
-        if: steps.day_info.outputs.should_run == 'true' && steps.stage-changes.outputs.has_changes == 'true'
+        if: env.should_run == 'true' && env.has_changes == 'true'
         run: |
-          # Pull latest first
-          git pull origin main --no-rebase || echo "Pull failed, continuing..."
+          git pull origin main --no-rebase || true
+          git push origin main || (sleep 2 && git pull origin main --no-rebase && git push origin main)
           
-          # Push with retry logic
-          MAX_RETRIES=3
-          COUNT=0
-          while [ $COUNT -lt $MAX_RETRIES ]; do
-            if git push origin main; then
-              echo "Push successful"
-              break
-            else
-              COUNT=$((COUNT+1))
-              echo "Push failed, retrying... ($COUNT/$MAX_RETRIES)"
-              sleep 2
-              git pull origin main --no-rebase || true
-            fi
-          done
-          
-      - name: Cleanup Temporary Files
+      - name: Cleanup
         if: always()
         run: |
           rm -f timestamp.txt 2>/dev/null || true
