@@ -228,6 +228,10 @@ jobs:
           
           python scripts/update_docs.py
           
+          # Update Activity.md
+          echo "" >> Activity.md
+          echo "**Last updated:** $(date '+%A, %B %d, %Y at %H:%M UTC')" >> Activity.md
+          echo "**Activity level:** ${{ env.activity_level }}" >> Activity.md
           echo "docs_updated=true" >> $GITHUB_ENV
           echo "✅ Documentation updated"
           
