@@ -228,11 +228,6 @@ jobs:
           
           python scripts/update_docs.py
           
-          # Update README
-          echo "" >> README.md
-          echo "**Last updated:** $(date '+%A, %B %d, %Y at %H:%M UTC')" >> README.md
-          echo "**Activity level:** ${{ env.activity_level }}" >> README.md
-          
           echo "docs_updated=true" >> $GITHUB_ENV
           echo "✅ Documentation updated"
           
