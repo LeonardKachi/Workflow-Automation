@@ -2,14 +2,23 @@ name: Daily Maintenance
 
 on:
   schedule:
-    - cron: '17 4 * * 1,3,5'
-    - cron: '42 20 * * 2,3,4,5'
-    - cron: '23 11 * * 2,6'
-  
+    # 10 trigger windows spread across the day, Mon-Sat
+    # Not all of these will execute - a randomized gate inside the job decides
+    - cron: '0 5 * * 1-6'
+    - cron: '30 7 * * 1-6'
+    - cron: '15 9 * * 1-6'
+    - cron: '45 11 * * 1-6'
+    - cron: '20 13 * * 1-6'
+    - cron: '0 15 * * 1-6'
+    - cron: '40 16 * * 1-6'
+    - cron: '10 18 * * 1-6'
+    - cron: '50 20 * * 1-6'
+    - cron: '25 22 * * 1-6'
+
   workflow_dispatch:
     inputs:
       force_run:
-        description: 'Force run even on weekend?'
+        description: 'Force run even on weekend or through randomizer?'
         required: false
         default: 'no'
         type: choice
@@ -24,103 +33,167 @@ jobs:
   maintenance:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-          
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install pytest pandas numpy matplotlib
-          
+
       - name: Configure Git
         run: |
           git config --global user.name "Kachi"
           git config --global user.email "Kachi.Henry.Leo@gmail.com"
           git config --global pull.rebase false
 
-      - name: Determine Day Type
+      - name: Randomized Gate + Heatmap Level Calculation
         id: day_info
         run: |
           DAY=$(date +%A)
           HOUR=$(date +%H)
+          DOM=$(date +%-d)   # Day of month: 1-31, no leading zero
           FORCE_RUN="${{ github.event.inputs.force_run }}"
-          
+
           echo "day_name=$DAY" >> $GITHUB_ENV
           echo "hour=$HOUR" >> $GITHUB_ENV
-          
-          # Check if it's Sunday and not forced
+
+          # --- Hard stop: Sunday ---
           if [ "$DAY" = "Sunday" ] && [ "$FORCE_RUN" != "yes" ]; then
             echo "should_run=false" >> $GITHUB_ENV
             echo "activity_level=skipped" >> $GITHUB_ENV
             echo "skip_tests=true" >> $GITHUB_ENV
             echo "is_sunday=true" >> $GITHUB_ENV
-            echo "🌞 Sunday detected - workflow will be skipped"
+            echo "Sunday detected - workflow will be skipped"
+            exit 0
+          fi
+
+          echo "is_sunday=false" >> $GITHUB_ENV
+
+          # --- Heatmap level determination via day-of-month seed ---
+          #
+          # GitHub contribution heatmap has 5 levels based on commit count:
+          #   Level 0 = grey    (0 commits)       - we skip (Sunday only)
+          #   Level 1 = #9be9a8 (1-3 commits)     - light green
+          #   Level 2 = #40c463 (4-6 commits)     - medium green
+          #   Level 3 = #30a14e (7-9 commits)     - dark green
+          #   Level 4 = #216e39 (10+ commits)     - darkest green
+          #
+          # We use day-of-month (1-31) as a deterministic seed so the level
+          # is fixed for that calendar date — all trigger windows on that day
+          # agree on the same target. A secondary per-window roll decides
+          # whether each individual window runs, producing natural spacing.
+          #
+          # Seed formula: (DOM * 7 + DOM^2) mod 31 => spreads 1-31 across 0-30
+          # Map 0-30 into 4 buckets to hit all heatmap levels with equal weight:
+          #   0-7   => level 1 (8 values)
+          #   8-15  => level 2 (8 values)
+          #   16-22 => level 3 (7 values)
+          #   23-30 => level 4 (8 values)
+
+          SEED=$(( (DOM * 7 + DOM * DOM) % 31 ))
+
+          if   [ "$SEED" -le 7 ];  then TARGET_LEVEL=1
+          elif [ "$SEED" -le 15 ]; then TARGET_LEVEL=2
+          elif [ "$SEED" -le 22 ]; then TARGET_LEVEL=3
+          else                          TARGET_LEVEL=4
+          fi
+
+          # Commit count targets per level (midpoints within each range):
+          #   Level 1 -> target 2 commits total across the day
+          #   Level 2 -> target 5 commits
+          #   Level 3 -> target 8 commits
+          #   Level 4 -> target 12 commits
+          #
+          # With 10 trigger windows, the per-window pass threshold is:
+          #   pass_threshold = (target_commits / 10) * 100
+          # Capped at 90 to always leave some variance.
+
+          case $TARGET_LEVEL in
+            1) THRESHOLD=20 ;;   # ~2 commits across 10 windows
+            2) THRESHOLD=50 ;;   # ~5 commits
+            3) THRESHOLD=80 ;;   # ~8 commits
+            4) THRESHOLD=90 ;;   # ~9-10 commits (darkest)
+          esac
+
+          echo "target_level=$TARGET_LEVEL" >> $GITHUB_ENV
+          echo "Day-of-month seed: DOM=$DOM SEED=$SEED TARGET_LEVEL=$TARGET_LEVEL THRESHOLD=$THRESHOLD%"
+
+          # --- Per-window pass roll ---
+          if [ "$FORCE_RUN" = "yes" ]; then
+            PASS=1
           else
-            echo "should_run=true" >> $GITHUB_ENV
-            echo "is_sunday=false" >> $GITHUB_ENV
-            
-            if [ "$DAY" = "Sunday" ] && [ "$FORCE_RUN" = "yes" ]; then
-              echo "activity_level=forced" >> $GITHUB_ENV
-              echo "skip_tests=false" >> $GITHUB_ENV
-              echo "⚠️ Sunday but force run enabled"
-            elif [ "$DAY" = "Saturday" ]; then
-              echo "activity_level=light" >> $GITHUB_ENV
-              echo "skip_tests=true" >> $GITHUB_ENV
-            elif [ "$HOUR" -lt 12 ]; then
-              echo "activity_level=normal" >> $GITHUB_ENV
-              echo "skip_tests=false" >> $GITHUB_ENV
+            RAND=$((RANDOM % 100))
+            if [ "$RAND" -lt "$THRESHOLD" ]; then
+              PASS=1
             else
-              echo "activity_level=evening" >> $GITHUB_ENV
-              echo "skip_tests=false" >> $GITHUB_ENV
+              PASS=0
             fi
           fi
-          
-          # Also set step outputs for backward compatibility
-          echo "day_name=$DAY" >> $GITHUB_OUTPUT
-          echo "hour=$HOUR" >> $GITHUB_OUTPUT
-          echo "should_run=${{ env.should_run }}" >> $GITHUB_OUTPUT
-          echo "activity_level=${{ env.activity_level }}" >> $GITHUB_OUTPUT
-          echo "skip_tests=${{ env.skip_tests }}" >> $GITHUB_OUTPUT
-          
-      - name: Early Exit if Sunday
+
+          if [ "$PASS" = "0" ]; then
+            echo "should_run=false" >> $GITHUB_ENV
+            echo "activity_level=skipped_by_randomizer" >> $GITHUB_ENV
+            echo "skip_tests=true" >> $GITHUB_ENV
+            echo "Window skipped - roll $RAND did not beat threshold $THRESHOLD"
+            exit 0
+          fi
+
+          # --- This window is active ---
+          echo "should_run=true" >> $GITHUB_ENV
+
+          if [ "$DAY" = "Saturday" ]; then
+            echo "activity_level=light" >> $GITHUB_ENV
+            echo "skip_tests=true" >> $GITHUB_ENV
+          elif [ "$HOUR" -lt 12 ]; then
+            echo "activity_level=normal" >> $GITHUB_ENV
+            echo "skip_tests=false" >> $GITHUB_ENV
+          else
+            echo "activity_level=evening" >> $GITHUB_ENV
+            echo "skip_tests=false" >> $GITHUB_ENV
+          fi
+
+      - name: Early Exit - Sunday
         if: env.is_sunday == 'true'
         run: |
           echo "## Sunday Maintenance Skipped" >> $GITHUB_STEP_SUMMARY
           echo "**Date:** $(date '+%Y-%m-%d')" >> $GITHUB_STEP_SUMMARY
-          echo "**Day:** ${{ env.day_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Reason:** Sunday - rest day (use force_run=yes to override)" >> $GITHUB_STEP_SUMMARY
+          echo "**Reason:** Sunday rest day (use force_run=yes to override)" >> $GITHUB_STEP_SUMMARY
           exit 0
-          
+
+      - name: Early Exit - Randomizer Gate
+        if: env.should_run == 'false' && env.is_sunday == 'false'
+        run: |
+          echo "## Run Skipped by Randomizer" >> $GITHUB_STEP_SUMMARY
+          echo "**Time window:** $(date '+%H:%M UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "**Day:** ${{ env.day_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Reason:** Probability roll did not pass threshold for this window" >> $GITHUB_STEP_SUMMARY
+          exit 0
+
       - name: Create necessary directories
         if: env.should_run == 'true'
         run: |
-          echo "Creating directories..."
-          mkdir -p test_results
-          mkdir -p scripts
-          mkdir -p docs
-          echo "✅ Directories created"
-          
+          mkdir -p test_results scripts docs
+          echo "Directories ready"
+
       - name: Create placeholder scripts
         if: env.should_run == 'true'
         run: |
-          echo "Creating placeholder scripts..."
-          
-          # Create run_tests.py
           cat > scripts/run_tests.py << 'EOF'
           #!/usr/bin/env python3
           import json
           from datetime import datetime
-          
+
           print("Running tests...")
           result = {
               "timestamp": datetime.now().isoformat(),
@@ -129,25 +202,21 @@ jobs:
               "failed": 0,
               "status": "success"
           }
-          
+
           with open("test_results/latest.json", "w") as f:
               json.dump(result, f, indent=2)
-          
-          print("✅ All tests passed")
+
+          print("All tests passed")
           EOF
-          
-          # Create process_data.py
+
           cat > scripts/process_data.py << 'EOF'
           #!/usr/bin/env python3
-          import json
+          import json, os
           from datetime import datetime
-          import os
-          
-          print("Processing data...")
-          
-          day = os.environ.get('day_name', 'Unknown')
+
+          day   = os.environ.get('day_name', 'Unknown')
           level = os.environ.get('activity_level', 'normal')
-          
+
           data = {
               "timestamp": datetime.now().isoformat(),
               "processed": True,
@@ -155,96 +224,80 @@ jobs:
               "day": day,
               "activity_level": level
           }
-          
+
           with open("processed_data.json", "w") as f:
               json.dump(data, f, indent=2)
-          
+
           with open("daily_update.md", "w") as f:
-              f.write(f"# {day} Update - {datetime.now().strftime('%Y-%m-%d')}\\n\\n")
-              f.write("## Activity Summary\\n")
-              f.write(f"- Data processed: {datetime.now().strftime('%H:%M')}\\n")
-              f.write(f"- Day type: {level}\\n")
-              f.write(f"- Records processed: {data['records']}\\n")
-          
-          print(f"✅ Data processed")
+              f.write(f"# {day} Update - {datetime.now().strftime('%Y-%m-%d')}\n\n")
+              f.write("## Activity Summary\n")
+              f.write(f"- Data processed: {datetime.now().strftime('%H:%M')}\n")
+              f.write(f"- Day type: {level}\n")
+              f.write(f"- Records processed: {data['records']}\n")
+
+          print("Data processed")
           EOF
-          
-          # Create update_docs.py
+
           cat > scripts/update_docs.py << 'EOF'
           #!/usr/bin/env python3
-          from datetime import datetime
           import os
-          
-          print("Updating documentation...")
-          
+          from datetime import datetime
+
           os.makedirs("docs", exist_ok=True)
-          
           level = os.environ.get('activity_level', 'normal')
-          
+
           with open("docs/analytics.md", "a") as f:
-              f.write(f"- Updated at {datetime.now().strftime('%Y-%m-%d %H:%M')} ({level})\\n")
-          
-          print("✅ Documentation updated")
+              f.write(f"- Updated at {datetime.now().strftime('%Y-%m-%d %H:%M')} ({level})\n")
+
+          print("Documentation updated")
           EOF
-          
+
           chmod +x scripts/*.py
-          echo "✅ Scripts created"
-          
+
       - name: Run Automated Tests
         if: env.should_run == 'true' && env.skip_tests == 'false'
         continue-on-error: true
         id: tests
         run: |
-          echo "Running test suite..."
           python scripts/run_tests.py
           echo "test_exit_code=$?" >> $GITHUB_ENV
-          
-      - name: Process Data & Generate Analytics
+
+      - name: Process Data and Generate Analytics
         if: env.should_run == 'true'
-        id: data-process
         run: |
-          echo "Processing data and generating analytics..."
           python scripts/process_data.py
           echo "data_processed=true" >> $GITHUB_ENV
-          echo "✅ Data processing complete"
-          
+
       - name: Update Documentation
         if: env.should_run == 'true'
-        id: docs
         run: |
-          echo "Updating documentation..."
-          
-          # Create varied commit messages
           MESSAGES=(
             "docs: Update project files - $(date '+%Y-%m-%d')"
             "chore: Maintenance updates for $(date '+%A')"
             "update: Daily sync and data processing"
             "fix: Minor updates and cleanup"
             "feat: Add daily analytics report"
+            "refactor: Clean up and reorganize"
+            "chore: Routine project maintenance"
+            "docs: Sync latest activity log"
           )
-          
           RANDOM_MSG=${MESSAGES[$RANDOM % ${#MESSAGES[@]}]}
           echo "commit_message=$RANDOM_MSG" >> $GITHUB_ENV
-          
+
           python scripts/update_docs.py
-          
-          # Update Activity.md
+
           echo "" >> Activity.md
           echo "**Last updated:** $(date '+%A, %B %d, %Y at %H:%M UTC')" >> Activity.md
           echo "**Activity level:** ${{ env.activity_level }}" >> Activity.md
-          echo "docs_updated=true" >> $GITHUB_ENV
-          echo "✅ Documentation updated"
-          
+
       - name: Create Work Log
         if: env.should_run == 'true'
         run: |
-          echo "Creating work log..."
-          
           cat > work_log.md << EOF
           # Work Log - $(date '+%A, %B %d, %Y')
-          
+
           EOF
-          
+
           if [ "${{ env.day_name }}" = "Saturday" ]; then
             cat >> work_log.md << EOF
           ## Weekend Maintenance
@@ -261,31 +314,40 @@ jobs:
           - Maintained code quality
           EOF
           fi
-          
+
           cat >> work_log.md << EOF
-          
+
           *Automated maintenance completed at $(date '+%H:%M UTC')*
           EOF
-          
-          echo "✅ Work log created"
-          
+
       - name: Generate Performance Report
         if: env.should_run == 'true'
         run: |
+          # Map target level to heatmap hex for display
+          case "${{ env.target_level }}" in
+            1) HEX="#9be9a8 (light green)"  ;;
+            2) HEX="#40c463 (medium green)" ;;
+            3) HEX="#30a14e (dark green)"   ;;
+            4) HEX="#216e39 (darkest green)";;
+            *) HEX="unknown"                ;;
+          esac
+
           cat > $GITHUB_STEP_SUMMARY << EOF
           ## Daily Maintenance Report
           **Date:** $(date '+%Y-%m-%d')
+          **Time:** $(date '+%H:%M UTC')
           **Day:** ${{ env.day_name }}
           **Activity Level:** ${{ env.activity_level }}
-          
+          **Heatmap Target:** Level ${{ env.target_level }} — $HEX
+
           EOF
-          
+
           if [ "${{ env.skip_tests }}" = "true" ]; then
             echo "**Note:** Weekend mode - tests skipped" >> $GITHUB_STEP_SUMMARY
           fi
-          
-          echo "**Status:** ✅ Completed successfully" >> $GITHUB_STEP_SUMMARY
-          
+
+          echo "**Status:** Completed successfully" >> $GITHUB_STEP_SUMMARY
+
       - name: Upload Test Results
         if: env.should_run == 'true' && env.skip_tests == 'false'
         uses: actions/upload-artifact@v4
@@ -303,40 +365,33 @@ jobs:
           git add processed_data.json 2>/dev/null || true
           git add docs/analytics.md 2>/dev/null || true
           git add README.md 2>/dev/null || true
-          
+
           if [ -d "test_results/" ] && [ "${{ env.skip_tests }}" = "false" ]; then
             git add test_results/ 2>/dev/null || true
           fi
-          
+
           if git diff --cached --quiet; then
-            echo "has_changes=false" >> $GITHUB_ENV
-            echo "No changes to commit"
-            
-            # Create timestamp file as fallback
             echo "Last touch: $(date)" > timestamp.txt
             git add timestamp.txt
-            echo "has_changes=true" >> $GITHUB_ENV
-          else
-            echo "has_changes=true" >> $GITHUB_ENV
           fi
-          
+
+          echo "has_changes=true" >> $GITHUB_ENV
+
       - name: Commit Updates
         if: env.should_run == 'true' && env.has_changes == 'true'
         run: |
           COMMIT_MSG="${{ env.commit_message }}"
-          
           if [ -z "$COMMIT_MSG" ]; then
             COMMIT_MSG="update: ${{ env.day_name }} maintenance - $(date '+%Y-%m-%d')"
           fi
-          
           git commit -m "$COMMIT_MSG" -m "- Updated work log" -m "- Processed daily data" -m "- Maintained project files"
-          
+
       - name: Push Changes
         if: env.should_run == 'true' && env.has_changes == 'true'
         run: |
           git pull origin main --no-rebase || true
           git push origin main || (sleep 2 && git pull origin main --no-rebase && git push origin main)
-          
+
       - name: Cleanup
         if: always()
         run: |
