@@ -2,18 +2,18 @@ name: Daily Maintenance
 
 on:
   schedule:
-    # 10 trigger windows spread across the day, Mon-Sat
-    # Not all of these will execute - a randomized gate inside the job decides
-    - cron: '0 5 * * 1-6'
-    - cron: '30 7 * * 1-6'
-    - cron: '15 9 * * 1-6'
-    - cron: '45 11 * * 1-6'
-    - cron: '20 13 * * 1-6'
-    - cron: '0 15 * * 1-6'
-    - cron: '40 16 * * 1-6'
-    - cron: '10 18 * * 1-6'
-    - cron: '50 20 * * 1-6'
-    - cron: '25 22 * * 1-6'
+    # 10 trigger windows spread across the day, Mon-Sun
+    # Not all execute — randomized gate + Sunday odd-day check decide at runtime
+    - cron: '0 5 * * 0-6'
+    - cron: '30 7 * * 0-6'
+    - cron: '15 9 * * 0-6'
+    - cron: '45 11 * * 0-6'
+    - cron: '20 13 * * 0-6'
+    - cron: '0 15 * * 0-6'
+    - cron: '40 16 * * 0-6'
+    - cron: '10 18 * * 0-6'
+    - cron: '50 20 * * 0-6'
+    - cron: '25 22 * * 0-6'
 
   workflow_dispatch:
     inputs:
@@ -66,48 +66,46 @@ jobs:
 
           echo "day_name=$DAY" >> $GITHUB_ENV
           echo "hour=$HOUR" >> $GITHUB_ENV
+          # Set defaults early so all paths have these vars defined
+          echo "is_sunday=false" >> $GITHUB_ENV
+          echo "should_run=false" >> $GITHUB_ENV
+          echo "skip_tests=true" >> $GITHUB_ENV
+          echo "activity_level=skipped" >> $GITHUB_ENV
 
-          # --- Hard stop: Sunday ---
+          # --- Sunday: run only if day-of-month is odd (~52% of Sundays) ---
+          DOM=$(date +%-d)
           if [ "$DAY" = "Sunday" ] && [ "$FORCE_RUN" != "yes" ]; then
-            echo "should_run=false" >> $GITHUB_ENV
-            echo "activity_level=skipped" >> $GITHUB_ENV
-            echo "skip_tests=true" >> $GITHUB_ENV
-            echo "is_sunday=true" >> $GITHUB_ENV
-            echo "Sunday - skipping"
-            exit 0
+            if [ $((DOM % 2)) -eq 0 ]; then
+              echo "is_sunday=true" >> $GITHUB_ENV
+              echo "Sunday DOM=$DOM (even) - skipping"
+              exit 0
+            else
+              echo "Sunday DOM=$DOM (odd) - proceeding to randomizer"
+            fi
           fi
 
-          echo "is_sunday=false" >> $GITHUB_ENV
-
           # --- Pure random gate ---
-          # $RANDOM in bash is seeded from system entropy on each runner boot.
-          # GitHub Actions runners are ephemeral — fresh VM per job — so every
-          # run gets a genuinely different seed. No determinism, no pattern.
+          # $RANDOM is seeded from system entropy on each ephemeral runner.
+          # Every job gets a genuinely different seed — no determinism.
           #
-          # How the heatmap spectrum works:
-          #   GitHub renders 5 shades based on commit count per day:
-          #     0 commits  = grey
-          #     1-3        = #9be9a8  light green
-          #     4-6        = #40c463  medium green
-          #     7-9        = #30a14e  dark green
-          #     10+        = #216e39  darkest green
+          # GitHub heatmap shades by commit count per day:
+          #   0 commits  = grey
+          #   1-3        = #9be9a8  light green
+          #   4-6        = #40c463  medium green
+          #   7-9        = #30a14e  dark green
+          #   10+        = #216e39  darkest green
           #
-          # We have 10 trigger windows per day. Each window independently rolls
-          # a number 0-99 and compares to THRESHOLD (40). Expected pass rate ~4/10
-          # windows = ~4 commits/day on average, but actual outcomes scatter freely
-          # across 0-10+. Over a month every heatmap shade will appear naturally
-          # because the distribution is genuinely stochastic — not seeded by date.
+          # 10 windows per day, double-roll gate at 55% each.
+          # Per-window pass rate: 55% x 55% = ~30%.
+          # Expected commits/day: ~3. Variance spans 0-10+.
+          # All heatmap shades appear naturally over a month.
 
           if [ "$FORCE_RUN" = "yes" ]; then
             PASS=1
           else
-            # Two independent rolls — both must pass to commit.
-            # This pushes the distribution toward lower commit counts on most days
-            # (organic feel) while still allowing high-count days to occur.
             ROLL_A=$((RANDOM % 100))
             ROLL_B=$((RANDOM % 100))
             THRESHOLD=55
-
             if [ "$ROLL_A" -lt "$THRESHOLD" ] && [ "$ROLL_B" -lt "$THRESHOLD" ]; then
               PASS=1
             else
@@ -116,17 +114,14 @@ jobs:
           fi
 
           if [ "$PASS" = "0" ]; then
-            echo "should_run=false" >> $GITHUB_ENV
-            echo "activity_level=skipped_by_randomizer" >> $GITHUB_ENV
-            echo "skip_tests=true" >> $GITHUB_ENV
-            echo "Window skipped"
+            echo "Window skipped - rolls did not both beat $THRESHOLD"
             exit 0
           fi
 
           # --- This window is active ---
           echo "should_run=true" >> $GITHUB_ENV
 
-          if [ "$DAY" = "Saturday" ]; then
+          if [ "$DAY" = "Saturday" ] || [ "$DAY" = "Sunday" ]; then
             echo "activity_level=light" >> $GITHUB_ENV
             echo "skip_tests=true" >> $GITHUB_ENV
           elif [ "$HOUR" -lt 12 ]; then
