@@ -36,13 +36,13 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.6.0
         with:
           python-version: '3.11'
 
@@ -57,12 +57,11 @@ jobs:
           git config --global user.email "Kachi.Henry.Leo@gmail.com"
           git config --global pull.rebase false
 
-      - name: Randomized Gate + Heatmap Level Calculation
+      - name: Randomized Gate
         id: day_info
         run: |
           DAY=$(date +%A)
           HOUR=$(date +%H)
-          DOM=$(date +%-d)   # Day of month: 1-31, no leading zero
           FORCE_RUN="${{ github.event.inputs.force_run }}"
 
           echo "day_name=$DAY" >> $GITHUB_ENV
@@ -74,67 +73,42 @@ jobs:
             echo "activity_level=skipped" >> $GITHUB_ENV
             echo "skip_tests=true" >> $GITHUB_ENV
             echo "is_sunday=true" >> $GITHUB_ENV
-            echo "Sunday detected - workflow will be skipped"
+            echo "Sunday - skipping"
             exit 0
           fi
 
           echo "is_sunday=false" >> $GITHUB_ENV
 
-          # --- Heatmap level determination via day-of-month seed ---
+          # --- Pure random gate ---
+          # $RANDOM in bash is seeded from system entropy on each runner boot.
+          # GitHub Actions runners are ephemeral — fresh VM per job — so every
+          # run gets a genuinely different seed. No determinism, no pattern.
           #
-          # GitHub contribution heatmap has 5 levels based on commit count:
-          #   Level 0 = grey    (0 commits)       - we skip (Sunday only)
-          #   Level 1 = #9be9a8 (1-3 commits)     - light green
-          #   Level 2 = #40c463 (4-6 commits)     - medium green
-          #   Level 3 = #30a14e (7-9 commits)     - dark green
-          #   Level 4 = #216e39 (10+ commits)     - darkest green
+          # How the heatmap spectrum works:
+          #   GitHub renders 5 shades based on commit count per day:
+          #     0 commits  = grey
+          #     1-3        = #9be9a8  light green
+          #     4-6        = #40c463  medium green
+          #     7-9        = #30a14e  dark green
+          #     10+        = #216e39  darkest green
           #
-          # We use day-of-month (1-31) as a deterministic seed so the level
-          # is fixed for that calendar date — all trigger windows on that day
-          # agree on the same target. A secondary per-window roll decides
-          # whether each individual window runs, producing natural spacing.
-          #
-          # Seed formula: (DOM * 7 + DOM^2) mod 31 => spreads 1-31 across 0-30
-          # Map 0-30 into 4 buckets to hit all heatmap levels with equal weight:
-          #   0-7   => level 1 (8 values)
-          #   8-15  => level 2 (8 values)
-          #   16-22 => level 3 (7 values)
-          #   23-30 => level 4 (8 values)
+          # We have 10 trigger windows per day. Each window independently rolls
+          # a number 0-99 and compares to THRESHOLD (40). Expected pass rate ~4/10
+          # windows = ~4 commits/day on average, but actual outcomes scatter freely
+          # across 0-10+. Over a month every heatmap shade will appear naturally
+          # because the distribution is genuinely stochastic — not seeded by date.
 
-          SEED=$(( (DOM * 7 + DOM * DOM) % 31 ))
-
-          if   [ "$SEED" -le 7 ];  then TARGET_LEVEL=1
-          elif [ "$SEED" -le 15 ]; then TARGET_LEVEL=2
-          elif [ "$SEED" -le 22 ]; then TARGET_LEVEL=3
-          else                          TARGET_LEVEL=4
-          fi
-
-          # Commit count targets per level (midpoints within each range):
-          #   Level 1 -> target 2 commits total across the day
-          #   Level 2 -> target 5 commits
-          #   Level 3 -> target 8 commits
-          #   Level 4 -> target 12 commits
-          #
-          # With 10 trigger windows, the per-window pass threshold is:
-          #   pass_threshold = (target_commits / 10) * 100
-          # Capped at 90 to always leave some variance.
-
-          case $TARGET_LEVEL in
-            1) THRESHOLD=20 ;;   # ~2 commits across 10 windows
-            2) THRESHOLD=50 ;;   # ~5 commits
-            3) THRESHOLD=80 ;;   # ~8 commits
-            4) THRESHOLD=90 ;;   # ~9-10 commits (darkest)
-          esac
-
-          echo "target_level=$TARGET_LEVEL" >> $GITHUB_ENV
-          echo "Day-of-month seed: DOM=$DOM SEED=$SEED TARGET_LEVEL=$TARGET_LEVEL THRESHOLD=$THRESHOLD%"
-
-          # --- Per-window pass roll ---
           if [ "$FORCE_RUN" = "yes" ]; then
             PASS=1
           else
-            RAND=$((RANDOM % 100))
-            if [ "$RAND" -lt "$THRESHOLD" ]; then
+            # Two independent rolls — both must pass to commit.
+            # This pushes the distribution toward lower commit counts on most days
+            # (organic feel) while still allowing high-count days to occur.
+            ROLL_A=$((RANDOM % 100))
+            ROLL_B=$((RANDOM % 100))
+            THRESHOLD=55
+
+            if [ "$ROLL_A" -lt "$THRESHOLD" ] && [ "$ROLL_B" -lt "$THRESHOLD" ]; then
               PASS=1
             else
               PASS=0
@@ -145,7 +119,7 @@ jobs:
             echo "should_run=false" >> $GITHUB_ENV
             echo "activity_level=skipped_by_randomizer" >> $GITHUB_ENV
             echo "skip_tests=true" >> $GITHUB_ENV
-            echo "Window skipped - roll $RAND did not beat threshold $THRESHOLD"
+            echo "Window skipped"
             exit 0
           fi
 
@@ -323,23 +297,12 @@ jobs:
       - name: Generate Performance Report
         if: env.should_run == 'true'
         run: |
-          # Map target level to heatmap hex for display
-          case "${{ env.target_level }}" in
-            1) HEX="#9be9a8 (light green)"  ;;
-            2) HEX="#40c463 (medium green)" ;;
-            3) HEX="#30a14e (dark green)"   ;;
-            4) HEX="#216e39 (darkest green)";;
-            *) HEX="unknown"                ;;
-          esac
-
           cat > $GITHUB_STEP_SUMMARY << EOF
           ## Daily Maintenance Report
           **Date:** $(date '+%Y-%m-%d')
           **Time:** $(date '+%H:%M UTC')
           **Day:** ${{ env.day_name }}
           **Activity Level:** ${{ env.activity_level }}
-          **Heatmap Target:** Level ${{ env.target_level }} — $HEX
-
           EOF
 
           if [ "${{ env.skip_tests }}" = "true" ]; then
@@ -350,7 +313,7 @@ jobs:
 
       - name: Upload Test Results
         if: env.should_run == 'true' && env.skip_tests == 'false'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: test-results-${{ env.day_name }}
           path: test_results/
