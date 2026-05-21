@@ -4,6 +4,12 @@ on:
   schedule:
     # 10 trigger windows spread across the day, Mon-Sun
     # Not all execute — randomized gate + Sunday odd-day check decide at runtime
+
+
+    - cron: '0 1 * * 0-6'
+    - cron: '0 2 * * 0-6'
+    - cron: '0 3 * * 0-6'
+    - cron: '0 4 * * 0-6'
     - cron: '0 5 * * 0-6'
     - cron: '30 7 * * 0-6'
     - cron: '15 9 * * 0-6'
