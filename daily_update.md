@@ -1,6 +1,6 @@
-# Sunday Update - 2026-05-31
+# Monday Update - 2026-06-01
 
 ## Activity Summary
-- Data processed: 11:06
-- Day type: light
+- Data processed: 08:30
+- Day type: normal
 - Records processed: 42
