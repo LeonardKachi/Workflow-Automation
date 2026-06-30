@@ -1,6 +1,6 @@
 # Project Automation Dashboard
 
-A sophisticated automation system that performs legitimate daily maintenance on your repository by processing data, running tests, and updating documentation with meaningful contributions.
+A automation system that performs legitimate daily maintenance on your repository by processing data, running tests, and updating documentation with meaningful contributions.
 
 ## Features
 
